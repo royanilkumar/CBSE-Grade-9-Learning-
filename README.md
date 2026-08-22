@@ -54,6 +54,22 @@ rebuilds the local Chroma index from scratch.
 
 Restart Claude Desktop after changing the configuration.
 
+## Question generation
+
+Question generation uses an OpenAI-compatible chat model while the local
+Chroma index supplies the textbook grounding. Set these environment variables
+before starting Claude Desktop:
+
+```powershell
+$env:OPENAI_API_KEY = "your-api-key"
+$env:OPENAI_MODEL = "gpt-4o-mini"
+```
+
+The `generate_questions` tool accepts a topic, subject, optional chapter,
+difficulty, question style, and question count. It returns original reasoning
+questions with answers, reasoning steps, and source-page references. The
+retrieval tools continue to work without an API key.
+
 ## MCP tools
 
 | Tool | Purpose |
@@ -62,5 +78,6 @@ Restart Claude Desktop after changing the configuration.
 | `list_chapters(subject?)` | List chapters, optionally by subject |
 | `search_content(query, chapter?, top_k, subject?)` | Semantic search with optional filters |
 | `get_chapter_content(chapter, subject?, max_chunks)` | Retrieve a chapter in page order |
+| `generate_questions(topic, subject, ...)` | Generate grounded reasoning questions |
 
 Scanned PDFs may need OCR before they can be indexed.

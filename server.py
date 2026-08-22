@@ -15,6 +15,8 @@ Then point an MCP client (e.g. Claude Desktop's config, or Claude Code) at
 this script. See README.md for the Claude Desktop config snippet.
 """
 
+import json
+import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -62,6 +64,18 @@ def get_metadata():
     if _metadata_cache is None:
         _metadata_cache = get_collection().get(include=["metadatas"])["metadatas"]
     return _metadata_cache
+
+
+def get_generation_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            "Question generation requires OPENAI_API_KEY. Set it in the MCP "
+            "server environment and restart Claude Desktop."
+        )
+    from openai import OpenAI
+
+    return OpenAI(api_key=api_key)
 
 
 @mcp.tool()
@@ -171,6 +185,68 @@ def get_indexed_summary() -> dict:
         "total_chunks": len(all_meta),
         "chapters": dict(sorted(counts.items())),
         "subjects": dict(sorted(subject_counts.items())),
+    }
+
+
+@mcp.tool()
+def generate_questions(
+    topic: str,
+    subject: str,
+    chapter: str | None = None,
+    difficulty: str = "medium",
+    question_type: str = "application",
+    question_count: int = 5,
+) -> dict:
+    """Generate reasoning-based questions grounded in indexed textbook content."""
+    question_count = max(1, min(question_count, 10))
+    difficulty = difficulty.lower().strip()
+    question_type = question_type.lower().strip()
+    if difficulty not in {"easy", "medium", "hard"}:
+        raise ValueError("difficulty must be easy, medium, or hard")
+
+    client = get_generation_client()
+    passages = search_content(
+        query=topic,
+        chapter=chapter,
+        subject=subject,
+        top_k=8,
+    )
+    if not passages:
+        return {"subject": subject, "topic": topic, "questions": []}
+
+    context = "\n\n".join(
+        f"Source: {item['source_file']}, page {item['page']}\n{item['text']}"
+        for item in passages
+    )
+    prompt = f"""Create {question_count} original Class 9 questions for {subject}.
+Topic: {topic}
+"""
+    prompt += f"Difficulty: {difficulty}\nQuestion style: {question_type}\n\n"
+    prompt += "Use the source passages only for factual grounding. Do not copy questions or sentences. Each question must require reasoning, application, comparison, inference, or multi-step thinking. Check every answer before returning it.\n\n"
+    prompt += "Return valid JSON only with this shape:\n"
+    prompt += '{"questions":[{"question":"...","answer":"...","reasoning_steps":["..."],"difficulty":"...","source_references":[{"source_file":"...","page":1}]}]}\n\n'
+    prompt += f"Source passages:\n{context}"
+
+    response = client.chat.completions.create(
+        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        temperature=0.4,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a careful CBSE Class 9 assessment designer. Return only valid JSON.",
+            },
+            {"role": "user", "content": prompt},
+        ],
+    )
+    content = response.choices[0].message.content or '{"questions": []}'
+    generated = json.loads(content)
+    return {
+        "subject": subject,
+        "topic": topic,
+        "difficulty": difficulty,
+        "question_type": question_type,
+        "questions": generated.get("questions", [])[:question_count],
     }
 
 
