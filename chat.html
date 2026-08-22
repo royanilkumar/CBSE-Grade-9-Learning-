@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CBSE Class 9 Tutor</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; max-width: 760px; margin: 0 auto; padding: 24px; color: #17202a; }
+    h1 { margin-bottom: 6px; }
+    .hint { color: #65727e; }
+    #messages { min-height: 280px; border: 1px solid #ccd4dc; border-radius: 8px; padding: 16px; margin: 20px 0; white-space: pre-wrap; }
+    .message { margin: 12px 0; }
+    .user { color: #135d9e; }
+    .assistant { color: #1f6b45; }
+    .sources { margin-top: 8px; font-size: 0.9em; }
+    .sources a { color: #135d9e; margin-right: 12px; }
+    form { display: grid; gap: 10px; }
+    input, select, button { font: inherit; padding: 10px; border: 1px solid #aeb8c2; border-radius: 6px; }
+    button { background: #135d9e; color: white; cursor: pointer; }
+    .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    @media (max-width: 600px) { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <h1>CBSE Class 9 Tutor</h1>
+  <div class="hint">Ask questions grounded in your local textbooks.</div>
+  <div id="messages">Ready. Select a subject and ask a question.</div>
+  <form id="chat-form">
+    <select id="subject">
+      <option value="">All subjects</option>
+      <option>Mathematics</option><option>Science</option><option>Social Science</option>
+      <option>English</option><option>Hindi</option><option>Skill</option>
+    </select>
+    <div class="row">
+      <input id="question" required placeholder="Ask a Class 9 question...">
+      <button type="submit">Ask</button>
+    </div>
+  </form>
+  <script>
+    const messages = document.getElementById('messages');
+    document.getElementById('chat-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const question = document.getElementById('question').value.trim();
+      const subject = document.getElementById('subject').value || null;
+      messages.textContent += `\n\nYou: ${question}\nAssistant: Thinking...`;
+      document.getElementById('question').value = '';
+      try {
+        const response = await fetch('/chat', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({question, subject}) });
+        const data = await response.json();
+        messages.textContent = messages.textContent.replace('Assistant: Thinking...', `Assistant: ${data.answer || data.error}`);
+        if (data.sources && data.sources.length) {
+          const sources = document.createElement('div');
+          sources.className = 'sources';
+          data.sources.forEach(source => {
+            const link = document.createElement('a');
+            link.href = source.url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = `${source.source_file}, page ${source.page}`;
+            sources.appendChild(link);
+          });
+          messages.appendChild(sources);
+        }
+      } catch (error) {
+        messages.textContent = messages.textContent.replace('Assistant: Thinking...', `Assistant: ${error}`);
+      }
+    });
+  </script>
+</body>
+</html>

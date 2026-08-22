@@ -34,8 +34,54 @@ the edition specified by your school or CBSE syllabus.
 .\.venv\Scripts\python.exe ingest.py
 ```
 
+Copy `.env.example` to `.env`. The `.env` file is ignored by Git and loaded
+automatically. Ollama is the default provider, so an OpenAI API key is not
+required.
+
 Run `ingest.py` again whenever PDFs are added, removed, or replaced. It
 rebuilds the local Chroma index from scratch.
+
+## Local chat
+
+Start the interactive tutor after completing the Ollama setup below:
+
+```powershell
+.\.venv\Scripts\python.exe chat.py
+```
+
+Use `/subject Science` or `/subject Maths` to restrict answers. Use `/quit`
+to exit. The chat retrieves local textbook passages before asking the model to
+answer, so responses include source-page references.
+
+## Local HTTP server
+
+Start an API on port 8000:
+
+```powershell
+.\.venv\Scripts\python.exe local_server.py
+```
+
+Open <http://127.0.0.1:8000/> in a browser for the chat window.
+
+Check the backend:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/health
+```
+
+List chapters without an AI key:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:8000/chapters
+```
+
+Ask a question:
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/chat `
+  -ContentType "application/json" `
+  -Body '{"subject":"Science","question":"Why is sunlight important for photosynthesis?"}'
+```
 
 ## Claude Desktop configuration
 
@@ -54,27 +100,54 @@ rebuilds the local Chroma index from scratch.
 
 Restart Claude Desktop after changing the configuration.
 
-## Question generation
+## Ollama setup
 
-Question generation uses an OpenAI-compatible chat model while the local
-Chroma index supplies the textbook grounding. Set these environment variables
-before starting Claude Desktop:
+Install Ollama from <https://ollama.com>, then open a new PowerShell window.
+Download the configured model:
 
 ```powershell
-$env:OPENAI_API_KEY = "your-api-key"
-$env:OPENAI_MODEL = "gpt-4o-mini"
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" pull qwen3:8b
 ```
 
-The `generate_questions` tool accepts a topic, subject, optional chapter,
-difficulty, question style, and question count. It returns original reasoning
-questions with answers, reasoning steps, and source-page references. The
-retrieval tools continue to work without an API key.
+Check that the model is installed and start the Ollama service if needed:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" list
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+```
+
+Confirm `.env` contains:
+
+```env
+LLM_PROVIDER=ollama
+LLM_MODEL=qwen3:8b
+OLLAMA_BASE_URL=http://127.0.0.1:11434/v1
+```
+
+Start the browser chat in another PowerShell window:
+
+```powershell
+.\.venv\Scripts\python.exe local_server.py
+```
+
+Open <http://127.0.0.1:8000/>. The `generate_questions` MCP tool and local
+chat use Ollama without an OpenAI API key.
+
+If you see `model 'qwen3:8b' not found`, run `ollama pull qwen3:8b` and
+restart `local_server.py`. If Ollama is installed but `ollama` is not
+recognized, use the full executable path shown above.
+
+## OpenAI alternative
+
+To use OpenAI instead, change `.env` to `LLM_PROVIDER=openai`, set a valid
+`OPENAI_API_KEY`, and optionally set `OPENAI_MODEL=gpt-4o-mini`.
 
 ## MCP tools
 
 | Tool | Purpose |
 |---|---|
 | `get_indexed_summary` | Show indexed chunk and subject counts |
+| `get_backend_status` | Show the active database path and record count |
 | `list_chapters(subject?)` | List chapters, optionally by subject |
 | `search_content(query, chapter?, top_k, subject?)` | Semantic search with optional filters |
 | `get_chapter_content(chapter, subject?, max_chunks)` | Retrieve a chapter in page order |

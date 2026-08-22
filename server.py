@@ -23,6 +23,9 @@ from collections import defaultdict
 import chromadb
 from chromadb.utils import embedding_functions
 from mcp.server.fastmcp import FastMCP
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
 
 DB_DIR = Path(__file__).parent / "data" / "chroma_db"
 COLLECTION_NAME = "cbse_class9_maths"
@@ -33,6 +36,20 @@ _client = None
 _collection = None
 _embedding_function = None
 _metadata_cache = None
+
+SUBJECT_ALIASES = {
+    "math": "Mathematics",
+    "maths": "Mathematics",
+    "mathematics": "Mathematics",
+    "social studies": "Social Science",
+    "social_science": "Social Science",
+    "social-science": "Social Science",
+    "social science": "Social Science",
+    "english": "English",
+    "hindi": "Hindi",
+    "science": "Science",
+    "skill": "Skill",
+}
 
 
 def get_embedding_function():
@@ -66,12 +83,27 @@ def get_metadata():
     return _metadata_cache
 
 
+def normalize_subject(subject: str | None) -> str | None:
+    if subject is None:
+        return None
+    return SUBJECT_ALIASES.get(subject.strip().lower(), subject.strip())
+
+
 def get_generation_client():
+    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+    if provider == "ollama":
+        from openai import OpenAI
+
+        return OpenAI(
+            api_key="ollama",
+            base_url=os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1"),
+        )
+
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key or api_key.startswith("replace_with_"):
         raise RuntimeError(
-            "Question generation requires OPENAI_API_KEY. Set it in the MCP "
-            "server environment and restart Claude Desktop."
+            "Set OPENAI_API_KEY, or set LLM_PROVIDER=ollama to use a local "
+            "Ollama model."
         )
     from openai import OpenAI
 
@@ -83,6 +115,7 @@ def list_chapters(subject: str | None = None) -> list[str]:
     """List every indexed chapter, optionally restricted to one subject."""
     coll = get_collection()
     all_meta = get_metadata()
+    subject = normalize_subject(subject)
     if subject:
         all_meta = [meta for meta in all_meta if meta["subject"] == subject]
     chapters = sorted(set(m["chapter"] for m in all_meta))
@@ -117,7 +150,7 @@ def search_content(
     if chapter:
         filters.append({"chapter": chapter})
     if subject:
-        filters.append({"subject": subject})
+        filters.append({"subject": normalize_subject(subject)})
     where = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else None)
     results = coll.query(
         query_texts=[query],
@@ -155,7 +188,7 @@ def get_chapter_content(
     coll = get_collection()
     filters = [{"chapter": chapter}]
     if subject:
-        filters.append({"subject": subject})
+        filters.append({"subject": normalize_subject(subject)})
     where = {"$and": filters} if len(filters) > 1 else filters[0]
     result = coll.get(where=where, include=["documents", "metadatas"])
     items = list(zip(result["documents"], result["metadatas"]))
@@ -185,6 +218,18 @@ def get_indexed_summary() -> dict:
         "total_chunks": len(all_meta),
         "chapters": dict(sorted(counts.items())),
         "subjects": dict(sorted(subject_counts.items())),
+    }
+
+
+@mcp.tool()
+def get_backend_status() -> dict:
+    """Report the active database path, collection, and indexed record count."""
+    collection = get_collection()
+    return {
+        "database_path": str(DB_DIR.resolve()),
+        "collection": COLLECTION_NAME,
+        "total_chunks": collection.count(),
+        "subjects": get_indexed_summary()["subjects"],
     }
 
 
@@ -228,13 +273,13 @@ Topic: {topic}
     prompt += f"Source passages:\n{context}"
 
     response = client.chat.completions.create(
-        model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen3:8b")),
         temperature=0.4,
         response_format={"type": "json_object"},
         messages=[
             {
                 "role": "system",
-                "content": "You are a careful CBSE Class 9 assessment designer. Return only valid JSON.",
+                "content": "You are a careful CBSE Class 9 assessment designer. Reason step by step internally, verify every answer, and return only valid JSON.",
             },
             {"role": "user", "content": prompt},
         ],
