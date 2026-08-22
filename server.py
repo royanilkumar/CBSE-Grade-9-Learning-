@@ -1,5 +1,5 @@
 """
-server.py — MCP server for CBSE Class 9 Mathematics.
+server.py — MCP server for CBSE Class 9.
 
 Exposes retrieval tools over content ingested from NCERT PDFs (see ingest.py).
 This server deliberately does NOT generate questions/worksheets itself — it
@@ -48,22 +48,33 @@ def get_collection():
 
 
 @mcp.tool()
-def list_chapters() -> list[str]:
-    """List every chapter currently indexed in the CBSE Class 9 Maths knowledge base."""
+def list_chapters(subject: str | None = None) -> list[str]:
+    """List every indexed chapter, optionally restricted to one subject."""
     coll = get_collection()
-    all_meta = coll.get(include=["metadatas"])["metadatas"]
+    result = coll.get(
+        where={"subject": subject} if subject else None,
+        include=["metadatas"],
+    )
+    all_meta = result["metadatas"]
     chapters = sorted(set(m["chapter"] for m in all_meta))
     return chapters
 
 
 @mcp.tool()
-def search_content(query: str, chapter: str | None = None, top_k: int = 6) -> list[dict]:
+def search_content(
+    query: str,
+    chapter: str | None = None,
+    top_k: int = 6,
+    subject: str | None = None,
+) -> list[dict]:
     """
-    Semantic search over the NCERT Class 9 Maths textbook content.
+    Semantic search over the indexed NCERT Class 9 textbook content.
 
     Args:
         query: What to search for, e.g. "factorization of polynomials" or
                "example problems on Heron's formula".
+        subject: Optional subject, such as "Mathematics", "Science", "English",
+             "Hindi", "Skill", or "Social Science".
         chapter: Optional exact chapter label (from list_chapters) to restrict
                  the search to a single chapter.
         top_k: How many chunks to return (default 6).
@@ -73,7 +84,12 @@ def search_content(query: str, chapter: str | None = None, top_k: int = 6) -> li
         source, so you can cite exactly where it came from.
     """
     coll = get_collection()
-    where = {"chapter": chapter} if chapter else None
+    filters = []
+    if chapter:
+        filters.append({"chapter": chapter})
+    if subject:
+        filters.append({"subject": subject})
+    where = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else None)
     results = coll.query(query_texts=[query], n_results=top_k, where=where)
 
     out = []
@@ -81,6 +97,7 @@ def search_content(query: str, chapter: str | None = None, top_k: int = 6) -> li
         out.append({
             "text": doc,
             "chapter": meta["chapter"],
+            "subject": meta["subject"],
             "source_file": meta["source_file"],
             "page": meta["page"],
         })
@@ -88,7 +105,9 @@ def search_content(query: str, chapter: str | None = None, top_k: int = 6) -> li
 
 
 @mcp.tool()
-def get_chapter_content(chapter: str, max_chunks: int = 40) -> list[dict]:
+def get_chapter_content(
+    chapter: str, subject: str | None = None, max_chunks: int = 40
+) -> list[dict]:
     """
     Retrieve the (near-)full indexed content of one chapter, in page order.
     Useful when generating a worksheet or question set that should cover an
@@ -96,10 +115,15 @@ def get_chapter_content(chapter: str, max_chunks: int = 40) -> list[dict]:
 
     Args:
         chapter: Exact chapter label as returned by list_chapters().
+        subject: Optional subject to disambiguate chapters with the same name.
         max_chunks: Safety cap on how many chunks to return.
     """
     coll = get_collection()
-    result = coll.get(where={"chapter": chapter}, include=["documents", "metadatas"])
+    filters = [{"chapter": chapter}]
+    if subject:
+        filters.append({"subject": subject})
+    where = {"$and": filters} if len(filters) > 1 else filters[0]
+    result = coll.get(where=where, include=["documents", "metadatas"])
     items = list(zip(result["documents"], result["metadatas"]))
     items.sort(key=lambda pair: (pair[1]["source_file"], pair[1]["page"]))
     items = items[:max_chunks]
@@ -119,11 +143,14 @@ def get_indexed_summary() -> dict:
     coll = get_collection()
     all_meta = coll.get(include=["metadatas"])["metadatas"]
     counts = defaultdict(int)
+    subject_counts = defaultdict(int)
     for m in all_meta:
         counts[m["chapter"]] += 1
+        subject_counts[m["subject"]] += 1
     return {
         "total_chunks": len(all_meta),
         "chapters": dict(sorted(counts.items())),
+        "subjects": dict(sorted(subject_counts.items())),
     }
 
 

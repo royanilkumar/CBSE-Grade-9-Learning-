@@ -2,8 +2,9 @@
 ingest.py — Turn CBSE/NCERT PDFs into a searchable local knowledge base.
 
 Usage:
-    1. Drop your NCERT Class 9 Maths chapter PDFs into ./data/pdfs/
-       (name them clearly, e.g. "ch01_number_systems.pdf", "ch02_polynomials.pdf")
+     1. Drop NCERT Class 9 PDFs into ./data/pdfs/<subject>/, where subject is
+         maths, science, social_science, english, hindi, or skill. Root-level
+         PDFs remain Mathematics.
     2. Run:  python ingest.py
     3. This builds a persistent Chroma vector store in ./data/chroma_db/
 
@@ -23,6 +24,18 @@ from chromadb.utils import embedding_functions
 PDF_DIR = Path(__file__).parent / "data" / "pdfs"
 DB_DIR = Path(__file__).parent / "data" / "chroma_db"
 COLLECTION_NAME = "cbse_class9_maths"
+
+SUBJECT_NAMES = {
+    "maths": "Mathematics",
+    "mathematics": "Mathematics",
+    "science": "Science",
+    "social_science": "Social Science",
+    "social-science": "Social Science",
+    "social science": "Social Science",
+    "english": "English",
+    "hindi": "Hindi",
+    "skill": "Skill",
+}
 
 CHUNK_SIZE_WORDS = 220      # roughly one solid "paragraph" of study content
 CHUNK_OVERLAP_WORDS = 40    # keeps context continuous across chunk boundaries
@@ -65,10 +78,15 @@ def guess_chapter_label(filename: str) -> str:
     return stem.replace("_", " ").title()
 
 
+def subject_for_pdf(pdf_path: Path) -> str:
+    """Get the subject from the immediate folder, defaulting to Mathematics."""
+    return SUBJECT_NAMES.get(pdf_path.parent.name.lower(), "Mathematics")
+
+
 def main():
-    if not PDF_DIR.exists() or not any(PDF_DIR.glob("*.pdf")):
+    if not PDF_DIR.exists() or not any(PDF_DIR.rglob("*.pdf")):
         print(f"No PDFs found in {PDF_DIR}")
-        print("Download NCERT Class 9 Maths chapter PDFs from ncert.nic.in "
+        print("Download NCERT Class 9 chapter PDFs from ncert.nic.in "
               "(Publications > PDF (I-XII) Books > Class 9 > Mathematics) "
               "and place them there first.")
         return
@@ -89,15 +107,16 @@ def main():
     doc_id = 0
     ids, docs, metadatas = [], [], []
 
-    pdf_files = sorted(PDF_DIR.glob("*.pdf"))
+    pdf_files = sorted(PDF_DIR.rglob("*.pdf"))
     for pdf_path in tqdm(pdf_files, desc="Processing PDFs"):
         chapter_label = guess_chapter_label(pdf_path.name)
+        subject = subject_for_pdf(pdf_path)
         for page_num, page_text in extract_pages(pdf_path):
             for chunk in chunk_text(page_text):
                 ids.append(f"doc_{doc_id}")
                 docs.append(chunk)
                 metadatas.append({
-                    "subject": "Mathematics",
+                    "subject": subject,
                     "grade": "9",
                     "chapter": chapter_label,
                     "source_file": pdf_path.name,
