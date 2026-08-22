@@ -29,6 +29,17 @@ mcp = FastMCP("cbse-class9-maths")
 
 _client = None
 _collection = None
+_embedding_function = None
+_metadata_cache = None
+
+
+def get_embedding_function():
+    global _embedding_function
+    if _embedding_function is None:
+        _embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name="all-MiniLM-L6-v2"
+        )
+    return _embedding_function
 
 
 def get_collection():
@@ -39,23 +50,27 @@ def get_collection():
                 "No knowledge base found. Run `python ingest.py` after placing "
                 "NCERT PDFs in data/pdfs/ first."
             )
-        embed_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name="all-MiniLM-L6-v2"
-        )
         _client = chromadb.PersistentClient(path=str(DB_DIR))
-        _collection = _client.get_collection(COLLECTION_NAME, embedding_function=embed_fn)
+        _collection = _client.get_collection(
+            COLLECTION_NAME, embedding_function=get_embedding_function()
+        )
     return _collection
+
+
+def get_metadata():
+    global _metadata_cache
+    if _metadata_cache is None:
+        _metadata_cache = get_collection().get(include=["metadatas"])["metadatas"]
+    return _metadata_cache
 
 
 @mcp.tool()
 def list_chapters(subject: str | None = None) -> list[str]:
     """List every indexed chapter, optionally restricted to one subject."""
     coll = get_collection()
-    result = coll.get(
-        where={"subject": subject} if subject else None,
-        include=["metadatas"],
-    )
-    all_meta = result["metadatas"]
+    all_meta = get_metadata()
+    if subject:
+        all_meta = [meta for meta in all_meta if meta["subject"] == subject]
     chapters = sorted(set(m["chapter"] for m in all_meta))
     return chapters
 
@@ -64,7 +79,7 @@ def list_chapters(subject: str | None = None) -> list[str]:
 def search_content(
     query: str,
     chapter: str | None = None,
-    top_k: int = 6,
+    top_k: int = 4,
     subject: str | None = None,
 ) -> list[dict]:
     """
@@ -90,7 +105,12 @@ def search_content(
     if subject:
         filters.append({"subject": subject})
     where = {"$and": filters} if len(filters) > 1 else (filters[0] if filters else None)
-    results = coll.query(query_texts=[query], n_results=top_k, where=where)
+    results = coll.query(
+        query_texts=[query],
+        n_results=max(1, min(top_k, 10)),
+        where=where,
+        include=["documents", "metadatas"],
+    )
 
     out = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
@@ -141,7 +161,7 @@ def get_indexed_summary() -> dict:
     to see what material is available before searching or generating content.
     """
     coll = get_collection()
-    all_meta = coll.get(include=["metadatas"])["metadatas"]
+    all_meta = get_metadata()
     counts = defaultdict(int)
     subject_counts = defaultdict(int)
     for m in all_meta:
