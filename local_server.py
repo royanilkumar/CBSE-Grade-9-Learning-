@@ -22,18 +22,36 @@ def answer_question(question: str, subject: str | None) -> dict:
             "sources": [],
         }
 
-    client = get_generation_client()
-
     passages = search_content(question, subject=subject, top_k=6)
     if not passages:
         return {"answer": "No matching textbook passages found.", "sources": []}
+
+    if not os.getenv("LLM_PROVIDER", "").strip():
+        return {
+            "answer": "Retrieved textbook passages:\n\n"
+            + "\n\n".join(
+                f"{item['source_file']} (page {item['page']})\n{item['text']}"
+                for item in passages
+            ),
+            "sources": [
+                {
+                    "subject": item["subject"],
+                    "source_file": item["source_file"],
+                    "page": item["page"],
+                    "url": f"/pdf/{quote(item['source_file'])}#page={item['page']}",
+                }
+                for item in passages
+            ],
+        }
+
+    client = get_generation_client()
 
     context = "\n\n".join(
         f"Source: {item['source_file']}, page {item['page']}\n{item['text']}"
         for item in passages
     )
     response = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen3:8b")),
+        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen2.5:7b")),
         temperature=0.3,
         messages=[
             {

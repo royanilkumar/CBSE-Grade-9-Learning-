@@ -35,8 +35,8 @@ the edition specified by your school or CBSE syllabus.
 ```
 
 Copy `.env.example` to `.env`. The `.env` file is ignored by Git and loaded
-automatically. Ollama is the default provider, so an OpenAI API key is not
-required.
+automatically. Retrieval-only mode is the default and needs no LLM model or
+API key.
 
 Run `ingest.py` again whenever PDFs are added, removed, or replaced. It
 rebuilds the local Chroma index from scratch.
@@ -130,8 +130,9 @@ Start the browser chat in another PowerShell window:
 .\.venv\Scripts\python.exe local_server.py
 ```
 
-Open <http://127.0.0.1:8000/>. The `generate_questions` MCP tool and local
-chat use Ollama without an OpenAI API key.
+Open <http://127.0.0.1:8000/>. Without an LLM configuration, it returns
+matching textbook passages and source links. Configure Ollama below when you
+want generated explanations.
 
 If you see `model 'qwen3:8b' not found`, run `ollama pull qwen3:8b` and
 restart `local_server.py`. If Ollama is installed but `ollama` is not
@@ -142,6 +143,9 @@ recognized, use the full executable path shown above.
 To use OpenAI instead, change `.env` to `LLM_PROVIDER=openai`, set a valid
 `OPENAI_API_KEY`, and optionally set `OPENAI_MODEL=gpt-4o-mini`.
 
+For faster but less detailed local answers, change `LLM_MODEL` to
+`qwen2.5:7b`.
+
 ## MCP tools
 
 | Tool | Purpose |
@@ -151,6 +155,5 @@ To use OpenAI instead, change `.env` to `LLM_PROVIDER=openai`, set a valid
 | `list_chapters(subject?)` | List chapters, optionally by subject |
 | `search_content(query, chapter?, top_k, subject?)` | Semantic search with optional filters |
 | `get_chapter_content(chapter, subject?, max_chunks)` | Retrieve a chapter in page order |
-| `generate_questions(topic, subject, ...)` | Generate grounded reasoning questions |
 
 Scanned PDFs may need OCR before they can be indexed.

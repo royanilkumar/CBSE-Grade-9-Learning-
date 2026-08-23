@@ -15,7 +15,7 @@ def ask_model(client, question: str, subject: str | None, passages: list[dict]) 
         for item in passages
     )
     response = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen3:8b")),
+        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen2.5:7b")),
         temperature=0.3,
         messages=[
             {
@@ -40,15 +40,17 @@ def ask_model(client, question: str, subject: str | None, passages: list[dict]) 
 
 
 def main() -> None:
-    provider = os.getenv("LLM_PROVIDER", "openai").strip().lower()
-    if provider != "ollama" and (
+    provider = os.getenv("LLM_PROVIDER", "").strip().lower()
+    client = None
+    if not provider:
+        print("Retrieval-only mode: no LLM configured.")
+    elif provider != "ollama" and (
         not os.getenv("OPENAI_API_KEY")
         or os.getenv("OPENAI_API_KEY", "").startswith("replace_with_")
     ):
-        print("OPENAI_API_KEY is not set. Or set LLM_PROVIDER=ollama.")
-        return
-
-    client = get_generation_client()
+        print("OPENAI_API_KEY is not set. Use retrieval-only mode or set LLM_PROVIDER=ollama.")
+    else:
+        client = get_generation_client()
     print("CBSE Class 9 local chat")
     print("Commands: /subject <name>, /clear, /quit")
     subject = None
@@ -77,7 +79,12 @@ def main() -> None:
             if not passages:
                 print("No matching textbook passages found.")
                 continue
-            print("\nAssistant:\n" + ask_model(client, question, subject, passages))
+            if client:
+                print("\nAssistant:\n" + ask_model(client, question, subject, passages))
+            else:
+                print("\nRetrieved textbook passages:\n")
+                for item in passages:
+                    print(f"[{item['source_file']}, page {item['page']}]\n{item['text']}\n")
         except Exception as error:
             print(f"\nError: {error}")
 

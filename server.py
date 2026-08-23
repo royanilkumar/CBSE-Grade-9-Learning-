@@ -15,7 +15,6 @@ Then point an MCP client (e.g. Claude Desktop's config, or Claude Code) at
 this script. See README.md for the Claude Desktop config snippet.
 """
 
-import json
 import os
 from pathlib import Path
 from collections import defaultdict
@@ -65,11 +64,9 @@ def get_collection():
     global _client, _collection
     if _collection is None:
         if not DB_DIR.exists():
-            raise RuntimeError(
-                "No knowledge base found. Run `python ingest.py` after placing "
-                "NCERT PDFs in data/pdfs/ first."
-            )
-        _client = chromadb.PersistentClient(path=str(DB_DIR))
+            raise RuntimeError("No knowledge base found. Run `python ingest.py` first.")
+        if _client is None:
+            _client = chromadb.PersistentClient(path=str(DB_DIR))
         _collection = _client.get_collection(
             COLLECTION_NAME, embedding_function=get_embedding_function()
         )
@@ -77,9 +74,14 @@ def get_collection():
 
 
 def get_metadata():
-    global _metadata_cache
+    global _client, _metadata_cache
     if _metadata_cache is None:
-        _metadata_cache = get_collection().get(include=["metadatas"])["metadatas"]
+        if not DB_DIR.exists():
+            raise RuntimeError("No knowledge base found. Run `python ingest.py` first.")
+        if _client is None:
+            _client = chromadb.PersistentClient(path=str(DB_DIR))
+        metadata_collection = _client.get_collection(COLLECTION_NAME)
+        _metadata_cache = metadata_collection.get(include=["metadatas"])["metadatas"]
     return _metadata_cache
 
 
@@ -101,10 +103,7 @@ def get_generation_client():
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key.startswith("replace_with_"):
-        raise RuntimeError(
-            "Set OPENAI_API_KEY, or set LLM_PROVIDER=ollama to use a local "
-            "Ollama model."
-        )
+        raise RuntimeError("Set OPENAI_API_KEY, or set LLM_PROVIDER=ollama.")
     from openai import OpenAI
 
     return OpenAI(api_key=api_key)
@@ -113,7 +112,6 @@ def get_generation_client():
 @mcp.tool()
 def list_chapters(subject: str | None = None) -> list[str]:
     """List every indexed chapter, optionally restricted to one subject."""
-    coll = get_collection()
     all_meta = get_metadata()
     subject = normalize_subject(subject)
     if subject:
@@ -230,68 +228,6 @@ def get_backend_status() -> dict:
         "collection": COLLECTION_NAME,
         "total_chunks": collection.count(),
         "subjects": get_indexed_summary()["subjects"],
-    }
-
-
-@mcp.tool()
-def generate_questions(
-    topic: str,
-    subject: str,
-    chapter: str | None = None,
-    difficulty: str = "medium",
-    question_type: str = "application",
-    question_count: int = 5,
-) -> dict:
-    """Generate reasoning-based questions grounded in indexed textbook content."""
-    question_count = max(1, min(question_count, 10))
-    difficulty = difficulty.lower().strip()
-    question_type = question_type.lower().strip()
-    if difficulty not in {"easy", "medium", "hard"}:
-        raise ValueError("difficulty must be easy, medium, or hard")
-
-    client = get_generation_client()
-    passages = search_content(
-        query=topic,
-        chapter=chapter,
-        subject=subject,
-        top_k=8,
-    )
-    if not passages:
-        return {"subject": subject, "topic": topic, "questions": []}
-
-    context = "\n\n".join(
-        f"Source: {item['source_file']}, page {item['page']}\n{item['text']}"
-        for item in passages
-    )
-    prompt = f"""Create {question_count} original Class 9 questions for {subject}.
-Topic: {topic}
-"""
-    prompt += f"Difficulty: {difficulty}\nQuestion style: {question_type}\n\n"
-    prompt += "Use the source passages only for factual grounding. Do not copy questions or sentences. Each question must require reasoning, application, comparison, inference, or multi-step thinking. Check every answer before returning it.\n\n"
-    prompt += "Return valid JSON only with this shape:\n"
-    prompt += '{"questions":[{"question":"...","answer":"...","reasoning_steps":["..."],"difficulty":"...","source_references":[{"source_file":"...","page":1}]}]}\n\n'
-    prompt += f"Source passages:\n{context}"
-
-    response = client.chat.completions.create(
-        model=os.getenv("LLM_MODEL", os.getenv("OPENAI_MODEL", "qwen3:8b")),
-        temperature=0.4,
-        response_format={"type": "json_object"},
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a careful CBSE Class 9 assessment designer. Reason step by step internally, verify every answer, and return only valid JSON.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    )
-    content = response.choices[0].message.content or '{"questions": []}'
-    generated = json.loads(content)
-    return {
-        "subject": subject,
-        "topic": topic,
-        "difficulty": difficulty,
-        "question_type": question_type,
-        "questions": generated.get("questions", [])[:question_count],
     }
 
 
