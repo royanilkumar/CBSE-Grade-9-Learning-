@@ -24,7 +24,7 @@ Folders named `maths`, `mathematics`, `science`, `english`, `hindi`, `skill`, or
 treated as Mathematics for compatibility. Chapter labels are inferred from
 filenames such as `ch01_topic.pdf`.
 
-Download the official NCERT Class 9 books from <https://ncert.nic.in> and use
+Download the official NCERT Class 9 books from [https://ncert.nic.in](https://ncert.nic.in) and use
 the edition specified by your school or CBSE syllabus.
 
 ## Install and index
@@ -61,7 +61,7 @@ Start an API on port 8000:
 .\.venv\Scripts\python.exe local_server.py
 ```
 
-Open <http://127.0.0.1:8000/> in a browser for the chat window.
+Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/) in a browser for the chat window.
 
 Check the backend:
 
@@ -83,6 +83,20 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/chat `
   -Body '{"subject":"Science","question":"Why is sunlight important for photosynthesis?"}'
 ```
 
+Create a practice set without an LLM:
+
+```powershell
+$body = @{topic="photosynthesis"; subject="Science"; mode="mixed"; count=5} | ConvertTo-Json
+Invoke-RestMethod -Method Post http://127.0.0.1:8000/practice `
+  -ContentType "application/json" -Body $body
+```
+
+The practice engine supports `mixed`, `flashcards`, `mcq`, `short_answer`, and
+`teach_back`. Activities are built from retrieved textbook passages, include
+chapter/page attribution, and can be checked with `POST /practice/check`.
+This works in retrieval-only mode, so practice remains available when no LLM
+or API key is configured.
+
 ## Claude Desktop configuration
 
 ```json
@@ -100,9 +114,14 @@ Invoke-RestMethod -Method Post http://127.0.0.1:8000/chat `
 
 Restart Claude Desktop after changing the configuration.
 
+The server uses the locally cached embedding model by default, so Claude can
+complete MCP startup without waiting for Hugging Face network checks. If the
+model has not been downloaded on this machine, run `ingest.py` once or start
+the server with `CBSE_ONLINE_MODEL=1` to allow the model download.
+
 ## Ollama setup
 
-Install Ollama from <https://ollama.com>, then open a new PowerShell window.
+Install Ollama from [https://ollama.com](https://ollama.com), then open a new PowerShell window.
 Download the configured model:
 
 ```powershell
@@ -130,7 +149,7 @@ Start the browser chat in another PowerShell window:
 .\.venv\Scripts\python.exe local_server.py
 ```
 
-Open <http://127.0.0.1:8000/>. Without an LLM configuration, it returns
+Open [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Without an LLM configuration, it returns
 matching textbook passages and source links. Configure Ollama below when you
 want generated explanations.
 
@@ -148,12 +167,14 @@ For faster but less detailed local answers, change `LLM_MODEL` to
 
 ## MCP tools
 
-| Tool | Purpose |
-|---|---|
-| `get_indexed_summary` | Show indexed chunk and subject counts |
-| `get_backend_status` | Show the active database path and record count |
-| `list_chapters(subject?)` | List chapters, optionally by subject |
-| `search_content(query, chapter?, top_k, subject?)` | Semantic search with optional filters |
-| `get_chapter_content(chapter, subject?, max_chunks)` | Retrieve a chapter in page order |
+| Tool                                                   | Purpose                                        |
+| ------------------------------------------------------ | ---------------------------------------------- |
+| `get_indexed_summary`                                | Show indexed chunk and subject counts          |
+| `get_backend_status`                                 | Show the active database path and record count |
+| `list_chapters(subject?)`                            | List chapters, optionally by subject           |
+| `search_content(query, chapter?, top_k, subject?)`   | Semantic search with optional filters          |
+| `get_chapter_content(chapter, subject?, max_chunks)` | Retrieve a chapter in page order               |
+| `create_practice_set(topic, mode?, subject?, chapter?, count?)` | Build source-grounded multi-mode practice |
+| `check_practice_answer(activity, response)`          | Score an MCQ or written response with feedback |
 
 Scanned PDFs may need OCR before they can be indexed.

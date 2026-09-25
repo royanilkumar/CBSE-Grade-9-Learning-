@@ -22,6 +22,15 @@
     input, select, button { font: inherit; padding: 10px; border: 1px solid #aeb8c2; border-radius: 6px; }
     button { background: #135d9e; color: white; cursor: pointer; }
     .row { display: grid; grid-template-columns: 1fr auto; gap: 10px; }
+    #practice { margin-top: 24px; padding-top: 20px; border-top: 1px solid #ccd4dc; }
+    #practice-items { display: grid; gap: 12px; margin-top: 14px; }
+    .practice-card { padding: 14px; border: 1px solid #ccd4dc; border-radius: 8px; background: #fff; }
+    .practice-card h3 { margin: 0 0 8px; color: #174d37; }
+    .practice-card textarea { width: 100%; min-height: 70px; box-sizing: border-box; margin: 10px 0; }
+    .choices { display: grid; gap: 6px; margin: 10px 0; }
+    .choices label { padding: 8px; background: #f4f7fa; border-radius: 5px; }
+    .practice-feedback { margin-top: 8px; font-weight: 600; }
+    .source-note { color: #65727e; font-size: 0.9em; }
     @media (max-width: 600px) { body { padding: 16px; } }
   </style>
 </head>
@@ -40,9 +49,28 @@
       <button type="submit">Ask</button>
     </div>
   </form>
+  <section id="practice">
+    <h2>Practice Lab</h2>
+    <div class="hint">Test recall, recognition, explanation, and teaching. Every item is built from the indexed textbook.</div>
+    <form id="practice-form">
+      <select id="practice-mode">
+        <option value="mixed">Mixed practice</option>
+        <option value="flashcards">Flashcards</option>
+        <option value="mcq">Multiple choice</option>
+        <option value="short_answer">Short answer</option>
+        <option value="teach_back">Teach-back</option>
+      </select>
+      <div class="row">
+        <input id="practice-topic" required placeholder="Topic to practise...">
+        <button type="submit">Build set</button>
+      </div>
+    </form>
+    <div id="practice-items"></div>
+  </section>
   <script>
     const messages = document.getElementById('messages');
     let pendingMessage = null;
+    let practiceItems = [];
 
     function addTextWithInlineCode(parent, text) {
       text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).forEach(part => {
@@ -115,6 +143,89 @@
       });
       return container;
     }
+
+    function renderPracticeSet(data) {
+      const container = document.getElementById('practice-items');
+      container.textContent = '';
+      practiceItems = data.items || [];
+      if (!practiceItems.length) {
+        container.textContent = data.message || 'No practice items found.';
+        return;
+      }
+      practiceItems.forEach((item, index) => {
+        const card = document.createElement('article');
+        card.className = 'practice-card';
+        const title = document.createElement('h3');
+        title.textContent = `${index + 1}. ${item.type.replace('_', ' ')}`;
+        card.appendChild(title);
+        const prompt = document.createElement('p');
+        prompt.textContent = item.prompt;
+        card.appendChild(prompt);
+        if (item.type === 'mcq') {
+          const choices = document.createElement('div');
+          choices.className = 'choices';
+          item.choices.forEach((choice, choiceIndex) => {
+            const label = document.createElement('label');
+            const radio = document.createElement('input');
+            radio.type = 'radio'; radio.name = `practice-${item.id}`; radio.value = choiceIndex + 1;
+            label.append(radio, ` ${choice}`); choices.appendChild(label);
+          });
+          card.appendChild(choices);
+        } else {
+          const input = document.createElement('textarea');
+          input.id = `practice-response-${item.id}`;
+          input.placeholder = 'Write your answer...';
+          card.appendChild(input);
+        }
+        const button = document.createElement('button');
+        button.type = 'button'; button.textContent = 'Check answer';
+        button.addEventListener('click', () => checkPracticeAnswer(item, card));
+        card.appendChild(button);
+        const source = document.createElement('div');
+        source.className = 'source-note';
+        source.textContent = `${item.source.source_file}, page ${item.source.page}`;
+        card.appendChild(source);
+        container.appendChild(card);
+      });
+    }
+
+    async function checkPracticeAnswer(item, card) {
+      let response = '';
+      if (item.type === 'mcq') {
+        response = card.querySelector('input[type="radio"]:checked')?.value || '';
+      } else {
+        response = card.querySelector('textarea')?.value || '';
+      }
+      const result = await fetch('/practice/check', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({activity: item, response})
+      }).then(response => response.json());
+      let feedback = card.querySelector('.practice-feedback');
+      if (!feedback) { feedback = document.createElement('div'); feedback.className = 'practice-feedback'; card.appendChild(feedback); }
+      feedback.textContent = `${result.score ?? 0}/100 — ${result.feedback || result.error || 'No feedback.'}`;
+      if (result.model_answer || result.explanation) {
+        const detail = document.createElement('div');
+        detail.textContent = `Source answer: ${result.model_answer || result.explanation}`;
+        feedback.appendChild(detail);
+      }
+    }
+
+    document.getElementById('practice-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const topic = document.getElementById('practice-topic').value.trim();
+      const mode = document.getElementById('practice-mode').value;
+      const container = document.getElementById('practice-items');
+      container.textContent = 'Building practice set...';
+      try {
+        const response = await fetch('/practice', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({topic, mode, subject: document.getElementById('subject').value || null, count: 5})
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Unable to build practice set.');
+        renderPracticeSet(data);
+      } catch (error) { container.textContent = String(error); }
+    });
 
     document.getElementById('chat-form').addEventListener('submit', async (event) => {
       event.preventDefault();

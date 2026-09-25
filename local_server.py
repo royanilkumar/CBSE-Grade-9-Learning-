@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
 from dotenv import load_dotenv
+from learning import build_practice_set, evaluate_answer
 from server import get_backend_status, get_generation_client, list_chapters, search_content
 
 load_dotenv(override=True)
@@ -83,6 +84,22 @@ def answer_question(question: str, subject: str | None) -> dict:
     }
 
 
+def create_practice(payload: dict) -> dict:
+    topic = str(payload.get("topic", "")).strip()
+    if not topic:
+        raise ValueError("topic is required")
+    count = int(payload.get("count", 5))
+    passages = search_content(
+        topic,
+        chapter=payload.get("chapter") or None,
+        subject=payload.get("subject") or None,
+        top_k=max(4, min(count, 10)),
+    )
+    result = build_practice_set(passages, mode=payload.get("mode", "mixed"), count=count)
+    result["topic"] = topic
+    return result
+
+
 class RequestHandler(BaseHTTPRequestHandler):
     def send_json(self, status: int, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -124,12 +141,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_json(404, {"error": "Use GET /health or POST /chat"})
 
     def do_POST(self) -> None:
-        if self.path != "/chat":
-            self.send_json(404, {"error": "Use POST /chat"})
+        if self.path not in {"/chat", "/practice", "/practice/check"}:
+            self.send_json(404, {"error": "Use POST /chat, /practice, or /practice/check"})
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length))
+            if self.path == "/practice":
+                self.send_json(200, create_practice(payload))
+                return
+            if self.path == "/practice/check":
+                self.send_json(200, evaluate_answer(payload.get("activity", {}), str(payload.get("response", ""))))
+                return
             question = str(payload.get("question", "")).strip()
             subject = payload.get("subject")
             if not question:

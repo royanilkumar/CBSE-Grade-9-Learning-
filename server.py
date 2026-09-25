@@ -23,8 +23,14 @@ import chromadb
 from chromadb.utils import embedding_functions
 from mcp.server.fastmcp import FastMCP
 from dotenv import load_dotenv
+from learning import MODES, build_practice_set, evaluate_answer
 
 load_dotenv(override=True)
+
+# Claude Desktop should not wait on Hugging Face network checks every time the
+# MCP server starts. Set CBSE_ONLINE_MODEL=1 when the model must be downloaded.
+if os.getenv("CBSE_ONLINE_MODEL", "0").strip().lower() not in {"1", "true", "yes"}:
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 DB_DIR = Path(__file__).parent / "data" / "chroma_db"
 COLLECTION_NAME = "cbse_class9_maths"
@@ -73,14 +79,20 @@ def get_collection():
     return _collection
 
 
+def get_raw_collection():
+    """Open Chroma without constructing an embedding model."""
+    global _client
+    if not DB_DIR.exists():
+        raise RuntimeError("No knowledge base found. Run `python ingest.py` first.")
+    if _client is None:
+        _client = chromadb.PersistentClient(path=str(DB_DIR))
+    return _client.get_collection(COLLECTION_NAME)
+
+
 def get_metadata():
-    global _client, _metadata_cache
+    global _metadata_cache
     if _metadata_cache is None:
-        if not DB_DIR.exists():
-            raise RuntimeError("No knowledge base found. Run `python ingest.py` first.")
-        if _client is None:
-            _client = chromadb.PersistentClient(path=str(DB_DIR))
-        metadata_collection = _client.get_collection(COLLECTION_NAME)
+        metadata_collection = get_raw_collection()
         _metadata_cache = metadata_collection.get(include=["metadatas"])["metadatas"]
     return _metadata_cache
 
@@ -170,6 +182,30 @@ def search_content(
 
 
 @mcp.tool()
+def create_practice_set(
+    topic: str,
+    mode: str = "mixed",
+    subject: str | None = None,
+    chapter: str | None = None,
+    count: int = 5,
+) -> dict:
+    """Create source-grounded practice in mixed, flashcard, MCQ, short-answer, or teach-back mode."""
+    if not topic.strip():
+        raise ValueError("topic is required")
+    passages = search_content(topic, chapter=chapter, top_k=max(4, min(count, 10)), subject=subject)
+    result = build_practice_set(passages, mode=mode, count=count)
+    result["topic"] = topic.strip()
+    result["available_modes"] = list(MODES)
+    return result
+
+
+@mcp.tool()
+def check_practice_answer(activity: dict, response: str) -> dict:
+    """Check one answer from create_practice_set and return feedback plus a score."""
+    return evaluate_answer(activity, response)
+
+
+@mcp.tool()
 def get_chapter_content(
     chapter: str, subject: str | None = None, max_chunks: int = 40
 ) -> list[dict]:
@@ -183,7 +219,7 @@ def get_chapter_content(
         subject: Optional subject to disambiguate chapters with the same name.
         max_chunks: Safety cap on how many chunks to return.
     """
-    coll = get_collection()
+    coll = get_raw_collection()
     filters = [{"chapter": chapter}]
     if subject:
         filters.append({"subject": normalize_subject(subject)})
@@ -205,7 +241,7 @@ def get_indexed_summary() -> dict:
     chapters indexed and how many chunks each has. Useful as a first call
     to see what material is available before searching or generating content.
     """
-    coll = get_collection()
+    coll = get_raw_collection()
     all_meta = get_metadata()
     counts = defaultdict(int)
     subject_counts = defaultdict(int)
@@ -222,7 +258,7 @@ def get_indexed_summary() -> dict:
 @mcp.tool()
 def get_backend_status() -> dict:
     """Report the active database path, collection, and indexed record count."""
-    collection = get_collection()
+    collection = get_raw_collection()
     return {
         "database_path": str(DB_DIR.resolve()),
         "collection": COLLECTION_NAME,
